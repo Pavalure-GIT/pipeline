@@ -1,0 +1,54 @@
+pipeline{
+    agent any
+ 
+    stages{
+        stage('Check Out SCM'){
+            steps{
+                git url: 'e4s@vs-ssh.visualstudio.com:v3/e4s/E4S-PublicCloud/SystemTeam', credentialsId: 'p4s-engineering', branch: 'master'
+            }
+        
+        }
+		
+        stage('Check Out JSON'){
+            steps{
+                sh 'mkdir -p json'
+                dir('json'){
+                    git url: 'e4s@vs-ssh.visualstudio.com:v3/e4s/E4S-PublicCloud/CUST-Scheduler-List', credentialsId: 'p4s-engineering', branch: 'master'
+                }
+            }
+        }
+
+        stage('AWS-Dev'){
+             //get keys from vault
+            environment {
+            AWS_ACCESS_KEY = vault path: "secret/064692377866/automation/aws/access_key", key: 'value', vaultUrl: 'http://10.4.0.11:8200', credentialsId: 'jenkinsreadvaulttoken'
+            AWS_SECRET_KEY = vault path: "secret/064692377866/automation/aws/secret_key", key: 'value', vaultUrl: 'http://10.4.0.11:8200', credentialsId: 'jenkinsreadvaulttoken'
+            DBPASS = vault path: "secret/064692377866/automation/sap/master_password", key: 'value', vaultUrl: 'http://10.4.0.11:8200', credentialsId: 'jenkinsreadvaulttoken'
+            }
+            
+            steps{
+                sh """
+                set +x
+                virtualenv .
+                source bin/activate
+                pip install -r aws_requirements.txt
+                export AWS_ACCESS_KEY_ID=${env.AWS_ACCESS_KEY}
+                export AWS_SECRET_ACCESS_KEY=${env.AWS_SECRET_KEY}
+                export DBPASS=${env.DBPASS}
+                ansible-playbook aws-start-stop.yml --extra-vars 'mode=stop always_on=${WORKSPACE}/json/aws-dev-always-on.json schedule=${WORKSPACE}/json/aws-dev-schedule.json'
+                """
+            }
+        }
+
+    }
+    post {
+    always {
+         emailext (
+            subject: " ${env.JOB_NAME} - AWS Development Customer Unverified Servers",
+			body: 'The following servers are unverified, please contact owners to investigate: ${FILE, path="unverified.txt"}',
+            to: 'e4s-publiccloud_system@dxc.com, sanjay.lobo@dxc.com'
+            )
+            
+        }
+    }
+}
